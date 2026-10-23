@@ -234,6 +234,84 @@ The `worker` container (`python -m app.jobs.worker`) polls the `jobs` table.
   the database's `now()`, never a worker's clock. Workers on different hosts can't disagree
   about whether a job is due. (The first version mixed both clocks; Windows' ~15 ms clock
   granularity made a just-created job look "not due yet", which a test caught.)
+- **Recompute jobs:** after storing new events, `normalize_batch` queues one
+  `recompute_machine` job per machine that got new events. The job uses a dedupe key, so
+  while a recompute is still queued, further batches for that machine don't add another:
+  21 batches in the full dataset need only 13 recomputes. Batches with only duplicates or
+  rejections queue nothing.
+- **Recompute locking:** a recompute locks the machine row first, so two recomputes of one
+  machine run one after the other, and the later one always reads the newest events. An
+  older result can never overwrite a newer one.
+
+### Derived machine state
+`app/derivation/rules.py` holds a pure function, `derive_state(machine, events)`. It
+recomputes the state from *all* of the machine's events, sorted by event time (never by
+arrival), so the same events always give the same result, whatever order they came in.
+The golden tests run the full dataset forwards and backwards to show this.
+
+**1. Each dimension uses only its latest evidence.** On a timestamp tie the more severe
+event counts as later, to stay cautious.
+
+| Dimension | Fed by | Severity (0-4) |
+|---|---|---|
+| Vibration | `vibration_mm_s`, `vibration_g` or a vibration alert | vendor severity if it is a vibration alert; **3** if mm/s > `rated_max_vibration_mm_s` |
+| Temperature | `temperature_c` or a temperature alert | vendor severity if it is a temperature alert; **3** if > `rated_max_temp_c` |
+| Power | `power_kw` or a power alert | vendor severity if it is a power alert; **2** if more than 30% away from `baseline_power_kw` |
+| Sensor health | `sensor_health`, `signal_quality` or a sensor alert | vendor severity if it is a sensor alert; **2** if health < 0.6; **1** if signal `poor` |
+| Unknown alert | latest event with an unrecognised code | **1** (worth a look; its level isn't trusted) |
+| Inspection | `inspection_result` | major defect / failed **3**; minor defect, observation, calibration pending **1** |
+| Maintenance | `maintenance_status` | overdue **2**; due soon **1** |
+| Work orders | latest state of each work order | each still open **1** |
+
+- A vendor's severity counts only for its own dimension: a `TEMP_SPIKE` with normal
+  vibration doesn't raise vibration.
+- A recovery or OK signal clears a dimension only through its readings. If those readings
+  are still above the rated limit, the dimension stays raised.
+- Operator notes are informational and don't change the status.
+
+**2. Completed maintenance resets the machine.** A MaintaFlow `completed` record, or a work
+order closed with `post_maintenance_check = passed`, clears all evidence older than itself,
+except work orders that are still open. A closed work order whose check failed doesn't
+reset anything.
+
+**3. The status:**
+
+| Status | When |
+|---|---|
+| `UNKNOWN` | no events yet |
+| `CRITICAL` | any severity 4. This wins over maintenance. |
+| `UNDER_MAINTENANCE` | `asset_status = maintenance`, or an open work order while the latest activity signal (`is_active`, else `machine_state == running`) says the machine isn't running |
+| `WARNING` / `WATCH` / `NORMAL` | highest severity 3 / 1-2 / 0 |
+
+- `attention_level` is the highest severity, and is still reported under maintenance.
+- `needs_attention` is true only for WATCH, WARNING and CRITICAL.
+- Every reason has a code, severity, dimension, message, confidence (manual or vendor) and
+  the source events behind it. That way each status can be traced back to raw vendor records.
+- **Freshness** (`FRESH` / `STALE`) is computed when the view is read, against an
+  injectable clock: STALE if the latest event is older than `STALE_AFTER_MINUTES`
+  (default 60). The sample data is from 2026-04-18, so with a real clock every machine
+  shows STALE.
+
+**Golden results** for the full dataset (all seed CSVs + all samples):
+
+| Machine | Status | Why |
+|---|---|---|
+| EQ-001 | WATCH | PF-1302's recovery (08:32:05) is newer than PF-1301's alert (08:31:02), although it arrived first. MF-501's minor defect remains. |
+| EQ-002 | CRITICAL | TW-8803 `TEMP_CRIT` level 5, 97 °C against a 90 °C rating |
+| EQ-003 | NORMAL | only recovery and OK signals |
+| EQ-004 | NORMAL | WO-1002 closed and passed (08:10), then MF-701 `completed` (08:40), clear the older power alerts |
+| EQ-005 | WARNING | PF-1501 measures 8.8 mm/s against an 8.0 rating |
+| EQ-006 | NORMAL | TW-9902 OK with good signal is newer than PF-1006's sensor-health drop |
+| EQ-007 | UNDER_MAINTENANCE | asset status is `maintenance`; WO-1004 is open and the machine is inactive |
+| EQ-008 | WARNING | PF-1401's recovery is newer than TW-9921's `TEMP_CRIT`, but MF-801 (08:41) still reports a major defect and WO-1003 is open |
+
+**Deliberate simplifications**
+- Exceeding a rated limit gives WARNING, never CRITICAL on its own; CRITICAL needs a vendor
+  critical alert.
+- Confidence (vendor or manual) is shown on each reason but doesn't scale its severity.
+- Thresholds are constants in `rules.py`. Per-machine-type thresholds would be the next step.
+- Changing `asset_reference.csv` doesn't trigger recomputes. They happen when new events
+  arrive.
 
 ## Trade-offs
 

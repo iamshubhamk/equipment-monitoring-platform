@@ -12,8 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.derivation.service import recompute_machine
 from app.jobs.errors import PermanentError
-from app.jobs.queue import NORMALIZE_BATCH
+from app.jobs.queue import NORMALIZE_BATCH, RECOMPUTE_MACHINE, enqueue_unique
 from app.models import BatchStatus, Event, IngestionBatch, Machine, RawRecord, RecordStatus
 from app.normalization import NORMALIZERS
 from app.normalization.canonical import MachineRef, NormalizationContext, NormalizedEvent
@@ -82,6 +83,7 @@ def normalize_batch(session: Session, payload: dict[str, Any], now: datetime) ->
         select(RawRecord).where(RawRecord.batch_id == batch.id).order_by(RawRecord.record_index)
     ).all()
 
+    touched: set[str] = set()
     for record in records:
         result = normalizer(record.raw, batch.raw_payload, ctx)
         if not result.accepted:
@@ -103,6 +105,11 @@ def normalize_batch(session: Session, payload: dict[str, Any], now: datetime) ->
         record.status = RecordStatus.ACCEPTED
         record.reason_codes = []
         record.event_id = event.id
+        touched.add(event.machine_id)
+
+    # Only machines that actually got new events need their state recomputed.
+    for machine_id in sorted(touched):
+        enqueue_unique(session, RECOMPUTE_MACHINE, {"machine_id": machine_id}, f"recompute:{machine_id}")
 
     statuses = [r.status for r in records]
     batch.accepted_count = statuses.count(RecordStatus.ACCEPTED)
@@ -126,6 +133,14 @@ def normalize_batch_failed(
         batch.processed_at = now
 
 
+def recompute(session: Session, payload: dict[str, Any], now: datetime) -> None:
+    machine_id = payload.get("machine_id")
+    if not machine_id:
+        raise PermanentError(f"invalid job payload: {payload}")
+    recompute_machine(session, machine_id, now)
+
+
 HANDLERS: dict[str, Handler] = {
     NORMALIZE_BATCH: Handler(run=normalize_batch, on_failure=normalize_batch_failed),
+    RECOMPUTE_MACHINE: Handler(run=recompute),
 }

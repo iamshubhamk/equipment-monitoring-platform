@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # MaintaFlow timestamps carry no timezone; this is the zone they are read in.
     maintaflow_timezone: str = "UTC"
 
+    # A machine whose latest event is older than this is reported STALE.
+    stale_after_minutes: float = 60.0
+
     # Worker
     worker_poll_interval_seconds: float = 1.0
     # Retry delays: 2s, 4s, 8s, 16s (attempt 5 is the last, then dead-letter).

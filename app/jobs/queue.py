@@ -13,12 +13,14 @@ on different hosts never disagree about whether a job is due.
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import Job, JobStatus
 
 NORMALIZE_BATCH = "normalize_batch"
+RECOMPUTE_MACHINE = "recompute_machine"
 
 
 def enqueue(session: Session, kind: str, payload: dict[str, Any]) -> Job:
@@ -30,6 +32,23 @@ def enqueue(session: Session, kind: str, payload: dict[str, Any]) -> Job:
     job = Job(kind=kind, payload=payload)
     session.add(job)
     return job
+
+
+def enqueue_unique(session: Session, kind: str, payload: dict[str, Any], dedupe_key: str) -> None:
+    """Enqueue unless a job with this key is already queued (not yet started).
+
+    Many new events for one machine then collapse into one pending recompute. A job
+    that is already running doesn't block a new one, so the newest events still get
+    picked up by the next run.
+    """
+    session.execute(
+        insert(Job)
+        .values(kind=kind, payload=payload, dedupe_key=dedupe_key)
+        .on_conflict_do_nothing(
+            index_elements=["dedupe_key"],
+            index_where=text("status = 'queued' AND dedupe_key IS NOT NULL"),
+        )
+    )
 
 
 def claim_next(session: Session, worker_id: str) -> Job | None:

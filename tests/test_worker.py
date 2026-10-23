@@ -6,7 +6,7 @@ from sqlalchemy import func, select, update
 from app.config import get_settings
 from app.jobs.errors import PermanentError, TransientError
 from app.jobs.handlers import HANDLERS, Handler, normalize_batch, normalize_batch_failed
-from app.jobs.queue import NORMALIZE_BATCH, claim_next, enqueue, recover_stale
+from app.jobs.queue import NORMALIZE_BATCH, RECOMPUTE_MACHINE, claim_next, enqueue, recover_stale
 from app.jobs.worker import run_once
 from app.models import (
     BatchStatus,
@@ -14,6 +14,7 @@ from app.models import (
     IngestionBatch,
     Job,
     JobStatus,
+    MachineState,
     RawRecord,
     RecordStatus,
     Vendor,
@@ -76,6 +77,9 @@ def test_every_sample_batch_is_fully_processed(client, make_session, reference_d
         assert RecordStatus.PENDING not in statuses
         assert session.scalar(select(func.count()).select_from(Event)) == stored.accepted_count
         assert set(session.scalars(select(Job.status))) == {JobStatus.SUCCEEDED}
+        # Every machine that got a new event has a derived state.
+        machines_with_events = set(session.scalars(select(Event.machine_id).distinct()))
+        assert set(session.scalars(select(MachineState.machine_id))) == machines_with_events
 
 
 def test_bad_records_are_rejected_without_affecting_the_rest(client, make_session, reference_data):
@@ -173,6 +177,71 @@ def test_rerunning_a_completed_batch_changes_nothing(client, make_session, refer
         assert session.scalar(select(func.count()).select_from(Event)) == 2
 
 
+# --- recompute jobs -------------------------------------------------------------------
+
+
+def test_new_events_queue_one_recompute_per_machine(client, make_session, reference_data):
+    ingest(client, Vendor.PULSEFORGE, PF_SAMPLE)  # EQ-001, EQ-002
+
+    run_once(make_session, "w")  # normalize only
+
+    with make_session() as session:
+        recomputes = session.scalars(select(Job).where(Job.kind == RECOMPUTE_MACHINE).order_by(Job.id)).all()
+        assert [(j.payload, j.status) for j in recomputes] == [
+            ({"machine_id": "EQ-001"}, JobStatus.QUEUED),
+            ({"machine_id": "EQ-002"}, JobStatus.QUEUED),
+        ]
+
+
+def test_recomputes_for_one_machine_coalesce_while_queued(client, make_session, reference_data):
+    ingest(client, Vendor.PULSEFORGE, PF_SAMPLE)
+    ingest(client, Vendor.PULSEFORGE, load_sample("out_of_order.json")["pulseforge"])  # EQ-001 again
+
+    run_once(make_session, "w")
+    run_once(make_session, "w")  # both batches normalized, no recompute run yet
+
+    with make_session() as session:
+        eq001 = session.scalars(
+            select(Job).where(Job.kind == RECOMPUTE_MACHINE, Job.payload["machine_id"].astext == "EQ-001")
+        ).all()
+        assert len(eq001) == 1
+
+
+def test_duplicate_only_batch_queues_no_recompute(client, make_session, reference_data):
+    ingest(client, Vendor.PULSEFORGE, PF_SAMPLE)
+    drain(make_session)
+    ingest(client, Vendor.PULSEFORGE, load_sample("duplicates.json")["pulseforge"])  # nothing new
+
+    drain(make_session)
+
+    with make_session() as session:
+        assert session.scalar(select(func.count()).where(Job.kind == RECOMPUTE_MACHINE)) == 2  # from batch 1
+
+
+def test_recompute_stores_the_derived_state(client, make_session, reference_data):
+    ingest(client, Vendor.PULSEFORGE, PF_SAMPLE)
+
+    drain(make_session)
+
+    with make_session() as session:
+        eq002 = session.get(MachineState, "EQ-002")
+        assert (eq002.derived_status, eq002.attention_level, eq002.needs_attention) == ("CRITICAL", 4, True)
+        assert eq002.event_count == 1
+        assert eq002.computed_at is not None
+        assert eq002.reasons[0]["source_event_refs"][0]["source_record_id"] == "PF-1002"
+
+
+def test_recompute_of_unknown_machine_is_dead_lettered(make_session):
+    with make_session() as session:
+        enqueue(session, RECOMPUTE_MACHINE, {"machine_id": "EQ-999"})
+        session.commit()
+
+    drain(make_session)
+
+    with make_session() as session:
+        assert session.scalar(select(Job.status)) == JobStatus.DEAD
+
+
 # --- retries, backoff and dead-lettering ----------------------------------------------
 
 
@@ -257,7 +326,7 @@ def test_failed_attempt_leaves_no_partial_results(client, make_session, referenc
     ingestion_id = ingest(client, Vendor.PULSEFORGE, PF_SAMPLE)
 
     def fail_after_work(session, payload, now):
-        normalize_batch(session, payload, now)  # writes events...
+        normalize_batch(session, payload, now)  # writes events and queues recomputes...
         raise TransientError("crash before commit")  # ...then fails
 
     handlers = {NORMALIZE_BATCH: Handler(run=fail_after_work, on_failure=normalize_batch_failed)}
@@ -265,6 +334,7 @@ def test_failed_attempt_leaves_no_partial_results(client, make_session, referenc
 
     with make_session() as session:
         assert session.scalar(select(func.count()).select_from(Event)) == 0
+        assert session.scalar(select(func.count()).where(Job.kind == RECOMPUTE_MACHINE)) == 0
         assert session.get(IngestionBatch, ingestion_id).status == BatchStatus.QUEUED
         assert set(session.scalars(select(RawRecord.status)).all()) == {RecordStatus.PENDING}
 
