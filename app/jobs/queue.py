@@ -5,12 +5,15 @@ Lifecycle: queued -> running -> succeeded
                              -> dead (permanent error or out of attempts)
 
 These functions change rows but don't commit; the caller owns the transaction.
+
+All queue timing (due, backoff, stale locks) uses the database clock, now(), so workers
+on different hosts never disagree about whether a job is due.
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.models import Job, JobStatus
@@ -29,7 +32,7 @@ def enqueue(session: Session, kind: str, payload: dict[str, Any]) -> Job:
     return job
 
 
-def claim_next(session: Session, worker_id: str, now: datetime) -> Job | None:
+def claim_next(session: Session, worker_id: str) -> Job | None:
     """Take the oldest due job.
 
     FOR UPDATE SKIP LOCKED lets several workers poll at once: a row another worker is
@@ -37,7 +40,7 @@ def claim_next(session: Session, worker_id: str, now: datetime) -> Job | None:
     """
     job = session.scalars(
         select(Job)
-        .where(Job.status == JobStatus.QUEUED, Job.run_after <= now)
+        .where(Job.status == JobStatus.QUEUED, Job.run_after <= func.now())
         .order_by(Job.run_after, Job.id)
         .limit(1)
         .with_for_update(skip_locked=True)
@@ -45,14 +48,14 @@ def claim_next(session: Session, worker_id: str, now: datetime) -> Job | None:
     if job is not None:
         job.status = JobStatus.RUNNING
         job.attempts += 1
-        job.locked_at = now
+        job.locked_at = func.now()
         job.locked_by = worker_id
     return job
 
 
-def mark_succeeded(job: Job, now: datetime) -> None:
+def mark_succeeded(job: Job) -> None:
     job.status = JobStatus.SUCCEEDED
-    job.finished_at = now
+    job.finished_at = func.now()
     job.locked_at = job.locked_by = None
 
 
@@ -66,7 +69,6 @@ def mark_failed(
     error: str,
     *,
     permanent: bool,
-    now: datetime,
     backoff_base_seconds: float,
     backoff_max_seconds: float,
 ) -> None:
@@ -74,23 +76,23 @@ def mark_failed(
     job.locked_at = job.locked_by = None
     if permanent or job.attempts >= job.max_attempts:
         job.status = JobStatus.DEAD
-        job.finished_at = now
+        job.finished_at = func.now()
     else:
         job.status = JobStatus.QUEUED
-        job.run_after = now + backoff_delay(job.attempts, backoff_base_seconds, backoff_max_seconds)
+        job.run_after = func.now() + backoff_delay(job.attempts, backoff_base_seconds, backoff_max_seconds)
 
 
-def recover_stale(session: Session, now: datetime, lock_timeout: timedelta) -> int:
+def recover_stale(session: Session, lock_timeout: timedelta) -> int:
     """Return jobs whose worker died mid-run to the queue (or dead-letter them if out of
     attempts). Returns how many jobs were recovered."""
-    stale = (Job.status == JobStatus.RUNNING, Job.locked_at < now - lock_timeout)
+    stale = (Job.status == JobStatus.RUNNING, Job.locked_at < func.now() - lock_timeout)
     common = {"locked_at": None, "locked_by": None, "last_error": "worker stopped before finishing"}
     dead = session.execute(
         update(Job)
         .where(*stale, Job.attempts >= Job.max_attempts)
-        .values(status=JobStatus.DEAD, finished_at=now, **common)
+        .values(status=JobStatus.DEAD, finished_at=func.now(), **common)
     ).rowcount
     requeued = session.execute(
-        update(Job).where(*stale).values(status=JobStatus.QUEUED, run_after=now, **common)
+        update(Job).where(*stale).values(status=JobStatus.QUEUED, run_after=func.now(), **common)
     ).rowcount
     return dead + requeued

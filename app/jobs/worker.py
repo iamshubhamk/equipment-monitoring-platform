@@ -40,7 +40,7 @@ def run_once(
     settings = settings or get_settings()
 
     with make_session() as session:
-        job = claim_next(session, worker_id, clock())
+        job = claim_next(session, worker_id)
         if job is None:
             return False
         session.commit()
@@ -52,7 +52,7 @@ def run_once(
             if handler is None:
                 raise PermanentError(f"no handler for job kind {kind!r}")
             handler.run(session, payload, clock())
-            mark_succeeded(session.get(Job, job_id), clock())
+            mark_succeeded(session.get(Job, job_id))
             session.commit()
             log.info("job %s (%s) succeeded on attempt %s", job_id, kind, attempt)
         except Exception as exc:
@@ -63,7 +63,6 @@ def run_once(
                 job,
                 error,
                 permanent=isinstance(exc, PermanentError),
-                now=clock(),
                 backoff_base_seconds=settings.job_backoff_base_seconds,
                 backoff_max_seconds=settings.job_backoff_max_seconds,
             )
@@ -100,7 +99,7 @@ def main() -> None:
     while not stopping:
         if time.monotonic() - last_recovery > settings.job_lock_timeout_seconds / 2:
             with SessionLocal() as session:
-                if recovered := recover_stale(session, utc_now(), lock_timeout):
+                if recovered := recover_stale(session, lock_timeout):
                     log.warning("recovered %s stale jobs", recovered)
                 session.commit()
             last_recovery = time.monotonic()

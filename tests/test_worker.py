@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.config import get_settings
 from app.jobs.errors import PermanentError, TransientError
@@ -18,21 +18,9 @@ from app.models import (
     RecordStatus,
     Vendor,
 )
-from app.vendors import VENDORS
 from tests.samples import ALL_SAMPLE_BATCHES, load_sample
 
 PF_SAMPLE = load_sample("pulseforge_sample.json")
-
-
-class FakeClock:
-    def __init__(self):
-        self.now = datetime.now(UTC)
-
-    def __call__(self) -> datetime:
-        return self.now
-
-    def advance(self, seconds: float) -> None:
-        self.now += timedelta(seconds=seconds)
 
 
 def ingest(client, vendor: Vendor, payload) -> str:
@@ -48,6 +36,17 @@ def drain(make_session, **kwargs) -> int:
     while run_once(make_session, "test-worker", **kwargs):
         processed += 1
     return processed
+
+
+def make_due(make_session) -> None:
+    """Skip the backoff wait: queue timing uses the database clock, so move run_after."""
+    with make_session() as session:
+        session.execute(update(Job).where(Job.status == JobStatus.QUEUED).values(run_after=func.now()))
+        session.commit()
+
+
+def normalize_job(session) -> Job:
+    return session.scalar(select(Job).where(Job.kind == NORMALIZE_BATCH))
 
 
 def records_by_id(session, ingestion_id) -> dict[str, RawRecord]:
@@ -66,7 +65,7 @@ def records_by_id(session, ingestion_id) -> dict[str, RawRecord]:
 def test_every_sample_batch_is_fully_processed(client, make_session, reference_data, sample, vendor, batch):
     ingestion_id = ingest(client, vendor, batch)
 
-    assert drain(make_session) == 1
+    drain(make_session)
 
     with make_session() as session:
         stored = session.get(IngestionBatch, ingestion_id)
@@ -76,7 +75,7 @@ def test_every_sample_batch_is_fully_processed(client, make_session, reference_d
         statuses = session.scalars(select(RawRecord.status).where(RawRecord.batch_id == ingestion_id)).all()
         assert RecordStatus.PENDING not in statuses
         assert session.scalar(select(func.count()).select_from(Event)) == stored.accepted_count
-        assert session.scalar(select(Job.status)) == JobStatus.SUCCEEDED
+        assert set(session.scalars(select(Job.status))) == {JobStatus.SUCCEEDED}
 
 
 def test_bad_records_are_rejected_without_affecting_the_rest(client, make_session, reference_data):
@@ -185,28 +184,28 @@ def flaky_handlers(failures: list[Exception]) -> dict[str, Handler]:
             raise failures.pop(0)
         normalize_batch(session, payload, now)
 
-    return {NORMALIZE_BATCH: Handler(run=run, on_failure=normalize_batch_failed)}
+    return {**HANDLERS, NORMALIZE_BATCH: Handler(run=run, on_failure=normalize_batch_failed)}
 
 
 def test_transient_failure_is_retried_with_exponential_backoff(client, make_session, reference_data):
     ingestion_id = ingest(client, Vendor.PULSEFORGE, PF_SAMPLE)
-    clock = FakeClock()
     handlers = flaky_handlers([TransientError("db blip"), TransientError("db blip")])
 
     for expected_delay in (2, 4):
-        assert run_once(make_session, "w", clock=clock, handlers=handlers)
+        assert run_once(make_session, "w", handlers=handlers)
         with make_session() as session:
-            job = session.scalar(select(Job))
+            job = normalize_job(session)
             assert job.status == JobStatus.QUEUED
-            assert job.run_after == clock.now + timedelta(seconds=expected_delay)
+            remaining = session.scalar(select(Job.run_after - func.now()).where(Job.id == job.id))
+            assert timedelta(seconds=expected_delay - 1) < remaining <= timedelta(seconds=expected_delay)
             assert job.last_error == "TransientError: db blip"
             assert session.get(IngestionBatch, ingestion_id).error == "TransientError: db blip"
-        assert not run_once(make_session, "w", clock=clock, handlers=handlers)  # not due yet
-        clock.advance(expected_delay)
+        assert not run_once(make_session, "w", handlers=handlers)  # not due yet
+        make_due(make_session)
 
-    assert run_once(make_session, "w", clock=clock, handlers=handlers)
+    assert run_once(make_session, "w", handlers=handlers)
     with make_session() as session:
-        job = session.scalar(select(Job))
+        job = normalize_job(session)
         assert (job.status, job.attempts) == (JobStatus.SUCCEEDED, 3)
         batch = session.get(IngestionBatch, ingestion_id)
         assert (batch.status, batch.error) == (BatchStatus.COMPLETED, None)
@@ -214,16 +213,15 @@ def test_transient_failure_is_retried_with_exponential_backoff(client, make_sess
 
 def test_job_is_dead_lettered_after_five_attempts(client, make_session, reference_data):
     ingestion_id = ingest(client, Vendor.PULSEFORGE, PF_SAMPLE)
-    clock = FakeClock()
     handlers = flaky_handlers([RuntimeError("bug")] * 10)  # unexpected errors count as transient
 
     for _ in range(5):
-        assert run_once(make_session, "w", clock=clock, handlers=handlers)
-        clock.advance(3600)
+        assert run_once(make_session, "w", handlers=handlers)
+        make_due(make_session)
 
-    assert not run_once(make_session, "w", clock=clock, handlers=handlers)
+    assert not run_once(make_session, "w", handlers=handlers)
     with make_session() as session:
-        job = session.scalar(select(Job))
+        job = normalize_job(session)
         assert (job.status, job.attempts, job.last_error) == (JobStatus.DEAD, 5, "RuntimeError: bug")
         batch = session.get(IngestionBatch, ingestion_id)
         assert batch.status == BatchStatus.FAILED
@@ -255,12 +253,11 @@ def test_unknown_job_kind_is_dead_lettered(make_session):
         assert session.scalar(select(Job.status)) == JobStatus.DEAD
 
 
-def test_failed_attempt_leaves_no_partial_results(client, make_session, reference_data, monkeypatch):
+def test_failed_attempt_leaves_no_partial_results(client, make_session, reference_data):
     ingestion_id = ingest(client, Vendor.PULSEFORGE, PF_SAMPLE)
-    real = HANDLERS[NORMALIZE_BATCH].run
 
     def fail_after_work(session, payload, now):
-        real(session, payload, now)  # writes events...
+        normalize_batch(session, payload, now)  # writes events...
         raise TransientError("crash before commit")  # ...then fails
 
     handlers = {NORMALIZE_BATCH: Handler(run=fail_after_work, on_failure=normalize_batch_failed)}
@@ -280,45 +277,49 @@ def test_concurrent_workers_skip_a_job_being_claimed(make_session):
         enqueue(session, "a", {})
         enqueue(session, "b", {})
         session.commit()
-    now = datetime.now(UTC)
 
     with make_session() as worker_1, make_session() as worker_2:
-        job_1 = claim_next(worker_1, "w1", now)  # row locked, not yet committed
-        job_2 = claim_next(worker_2, "w2", now)  # skips the locked row instead of waiting
+        job_1 = claim_next(worker_1, "w1")  # row locked, not yet committed
+        job_2 = claim_next(worker_2, "w2")  # skips the locked row instead of waiting
         assert {job_1.kind, job_2.kind} == {"a", "b"}
-        assert claim_next(worker_2, "w2", now) is None
+        assert claim_next(worker_2, "w2") is None
         worker_1.commit()
         worker_2.commit()
 
 
-def enqueue_and_commit(session, **fields) -> Job:
+def claim_and_abandon(session, **fields) -> None:
+    """Claim a job as a worker that then died ten minutes ago."""
     job = enqueue(session, "a", {})
     for name, value in fields.items():
         setattr(job, name, value)
     session.commit()
-    return job  # run_after is the database's now() at insert
+    claim_next(session, "dead-worker").locked_at = func.now() - timedelta(minutes=10)
+    session.commit()
 
 
 def test_stale_running_job_is_recovered(make_session):
     with make_session() as session:
-        now = enqueue_and_commit(session).run_after
-        claim_next(session, "dead-worker", now).locked_at = now - timedelta(minutes=10)  # worker died
-        session.commit()
+        claim_and_abandon(session)
 
-        assert recover_stale(session, now, timedelta(minutes=5)) == 1
+        assert recover_stale(session, timedelta(minutes=5)) == 1
         session.commit()
 
         job = session.scalar(select(Job))
         assert (job.status, job.locked_by, job.attempts) == (JobStatus.QUEUED, None, 1)
 
 
+def test_recently_claimed_job_is_not_recovered(make_session):
+    with make_session() as session:
+        claim_and_abandon(session)
+
+        assert recover_stale(session, timedelta(minutes=15)) == 0
+
+
 def test_stale_job_out_of_attempts_is_dead_lettered(make_session):
     with make_session() as session:
-        now = enqueue_and_commit(session, max_attempts=1).run_after
-        claim_next(session, "dead-worker", now).locked_at = now - timedelta(minutes=10)  # worker died
-        session.commit()
+        claim_and_abandon(session, max_attempts=1)
 
-        recover_stale(session, now, timedelta(minutes=5))
+        recover_stale(session, timedelta(minutes=5))
         session.commit()
 
         assert session.scalar(select(Job.status)) == JobStatus.DEAD

@@ -230,9 +230,10 @@ The `worker` container (`python -m app.jobs.worker`) polls the `jobs` table.
 - **Record ids are immutable:** if a vendor re-sends an id with *different* content, the
   first version is kept and the new copy is marked `DUPLICATE_RECORD_ID` + `CONTENT_DIFFERS`
   for review. It is not applied, because a silently overwritten reading can't be audited.
-- **Clocks:** `run_after` is stamped by the database when a job is created, but the worker
-  compares it against its own clock. On one host (Compose) they agree; across hosts the
-  clocks need to be in sync (NTP).
+- **One clock for the queue:** all queue timing (is a job due, backoff, stale locks) uses
+  the database's `now()`, never a worker's clock. Workers on different hosts can't disagree
+  about whether a job is due. (The first version mixed both clocks; Windows' ~15 ms clock
+  granularity made a just-created job look "not due yet", which a test caught.)
 
 ## Trade-offs
 
