@@ -83,9 +83,14 @@ def reference_data(db_session: Session) -> None:
 
 
 @pytest.fixture
-def client(engine: Engine, db_session: Session) -> Iterator[TestClient]:
+def make_session(engine: Engine, db_session: Session) -> sessionmaker[Session]:
+    """Session factory on the test database (depends on db_session for cleanup)."""
+    return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+@pytest.fixture
+def client(make_session: sessionmaker[Session]) -> Iterator[TestClient]:
     """API client whose requests use the test database (each request its own session)."""
-    make_session = sessionmaker(bind=engine, expire_on_commit=False)
 
     def test_session() -> Iterator[Session]:
         with make_session() as session:

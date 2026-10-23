@@ -204,6 +204,36 @@ other problem keeps the record and adds a quality flag:
   record id or arrival time. So `TW-8801-R` hashes the same as `TW-8801`, and a reading
   arriving via CSV hashes the same as via JSON.
 
+### Background processing
+The `worker` container (`python -m app.jobs.worker`) polls the `jobs` table.
+
+- **Claiming:** `SELECT ... FOR UPDATE SKIP LOCKED` takes the oldest due job, so any number
+  of workers can run side by side without handing out a job twice.
+- **Transactions:** the claim is committed on its own. The handler's work and "mark
+  succeeded" are then committed together, so a failed attempt is rolled back completely:
+  no half-normalized batch.
+- **Failures:**
+  - `PermanentError` (e.g. the batch doesn't exist, or the job kind is unknown) → dead at once.
+  - `TransientError` or any unexpected exception → retried after 2s, 4s, 8s, 16s (capped at
+    5 min). After the 5th attempt the job is dead.
+  - A dead `normalize_batch` marks its batch `failed`, with the last error. Its raw records
+    stay `pending`, so it can be replayed once the cause is fixed.
+- **Crash recovery:** a job left `running` longer than `JOB_LOCK_TIMEOUT_SECONDS` (5 min) is
+  assumed lost and re-queued, or dead-lettered if it is out of attempts. Processing is
+  therefore at-least-once, and handlers are safe to re-run: a completed batch is skipped.
+- **Dedupe** (per vendor only, never across vendors):
+  1. same vendor + record id → `duplicate` with `DUPLICATE_RECORD_ID`;
+  2. otherwise same vendor + content hash → `duplicate` with `DUPLICATE_CONTENT`.
+
+  A duplicate raw record links to the event it duplicates. Records within one batch are
+  checked against each other too (PF-1001 twice in `duplicates.json`).
+- **Record ids are immutable:** if a vendor re-sends an id with *different* content, the
+  first version is kept and the new copy is marked `DUPLICATE_RECORD_ID` + `CONTENT_DIFFERS`
+  for review. It is not applied, because a silently overwritten reading can't be audited.
+- **Clocks:** `run_after` is stamped by the database when a job is created, but the worker
+  compares it against its own clock. On one host (Compose) they agree; across hosts the
+  clocks need to be in sync (NTP).
+
 ## Trade-offs
 
 _TBD_

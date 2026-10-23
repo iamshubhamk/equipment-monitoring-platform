@@ -29,6 +29,21 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build: .
+    command: python -m app.jobs.worker
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/equipment
+    # Healthy api means migrations and reference data are in place.
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   pgdata:

@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     # MaintaFlow timestamps carry no timezone; this is the zone they are read in.
     maintaflow_timezone: str = "UTC"
 
+    # Worker
+    worker_poll_interval_seconds: float = 1.0
+    # Retry delays: 2s, 4s, 8s, 16s (attempt 5 is the last, then dead-letter).
+    job_backoff_base_seconds: float = 2.0
+    job_backoff_max_seconds: float = 300.0
+    # A running job not finished within this time is assumed lost and re-queued.
+    job_lock_timeout_seconds: float = 300.0
+
     def api_key_for(self, vendor: Vendor) -> str:
         return getattr(self, f"api_key_{vendor.value}")
 
