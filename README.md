@@ -157,6 +157,53 @@ Each assumption is recorded when the code that depends on it is written.
 - API keys are static per vendor and come from environment variables. In production they
   would come from a secrets manager and support rotation (two valid keys at once).
 
+### Normalization
+One pure normalizer per source (`app/normalization/`): raw record + batch envelope +
+reference data in, either a canonical event or a list of reject reasons out. The seed CSVs
+go through the same normalizers; field aliases cover the different spellings
+(ThermexWatch `readingId` in JSON vs `reading_id` in CSV).
+
+| | PulseForge | ThermexWatch | MaintaFlow | Work orders |
+|---|---|---|---|---|
+| Time | ISO-8601 with offset → UTC | epoch ms (UTC) | `2026/04/18 08:14:05` in `MAINTAFLOW_TIMEZONE` (default UTC) | `closed_at` if closed, else `opened_at` |
+| Temperature | °C | °F → °C (2 dp) | – | – |
+| Vibration | mm/s | g, stored as-is | – | – |
+| Severity (0-4) | low/medium/high/critical → 1/2/3/4 | level 1-5 → 0-4 | none | none |
+| Confidence | `vendor_confidence` 0-1 | – | `manual_confidence` high/medium/low → 0.9/0.6/0.3 | – |
+
+**Reject vs flag.** A record is rejected (kept in `raw_records` with reason codes) only
+when it can't be placed on a machine timeline: missing record id, missing machine id,
+machine not in `asset_reference.csv`, or a missing/unparseable/zone-less event time. Any
+other problem keeps the record and adds a quality flag:
+- bad optional value → stored as null, flagged `INVALID_<FIELD>` or `<FIELD>_OUT_OF_RANGE`
+  (e.g. `temperature_c: -999`, `sensor_health: "bad"`, `vendor_confidence: 1.2`);
+- unknown code → canonical value null (or event type `unknown`), raw value kept in
+  `attributes`, flagged `UNKNOWN_<FIELD>` (e.g. severity `urgent`, alert `UNKNOWN_ALERT`).
+
+**Other choices**
+- Vendor codes are mapped to vendor-neutral event types (`HIGH_VIBRATION` and `VIB_WARN` →
+  `vibration_alert`; `TEMP_SPIKE`, `TEMP_WARN`, `TEMP_CRIT` → `temperature_alert`, told
+  apart by severity). The vendor's code is always kept in `attributes.vendor_event_type`.
+- Plant and line come from `asset_reference.csv`. A vendor value that disagrees is flagged
+  (`PLANT_MISMATCH`, `LINE_MISMATCH`) and kept in `attributes`. Short line ids are expanded
+  (`A` → `LINE-A`).
+- A timestamp without a timezone (`2026-04-18T07:59:12`) is rejected for the ISO-based
+  vendors rather than guessed. MaintaFlow is the exception: its format never has a zone,
+  so a configured zone is applied.
+- `18-04-2026 08:28:20` (PF-1202) is rejected, not reinterpreted as day-month-year, because
+  PulseForge's documented format is ISO-8601 and a guess could silently misplace an event.
+- ThermexWatch vibration in g is not converted to mm/s: that needs the vibration frequency,
+  which isn't sent. Rated vibration limits (mm/s) therefore apply only to PulseForge readings.
+- MaintaFlow `maintenance_status: "unknown"` means "no information" and is stored as null
+  without a flag.
+- Epoch-ms values outside 2000-2100 are treated as invalid.
+- Each work-order state is its own event with id `<work_order_id>:<status>`, so the
+  open → closed update isn't discarded as a duplicate. A closed order with no `closed_at`
+  falls back to `opened_at` and is flagged `MISSING_CLOSED_AT`.
+- The content hash covers what was observed (machine, time, type, readings, codes), not the
+  record id or arrival time. So `TW-8801-R` hashes the same as `TW-8801`, and a reading
+  arriving via CSV hashes the same as via JSON.
+
 ## Trade-offs
 
 _TBD_

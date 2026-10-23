@@ -5,6 +5,7 @@ Single-vendor files (pulseforge_sample.json, ...) are one batch. Multi-vendor fi
 because ingestion is per vendor.
 """
 
+import csv
 import json
 from typing import Any
 
@@ -31,3 +32,16 @@ def vendor_batches(name: str) -> list[tuple[Vendor, dict[str, Any]]]:
 ALL_SAMPLE_BATCHES = [
     (name, vendor, batch) for name in SAMPLE_FILES for vendor, batch in vendor_batches(name)
 ]
+
+SEED_DIR = DATA_DIR / "seed_data"
+SEED_FILES = {
+    "pulseforge_events.csv": Vendor.PULSEFORGE,
+    "thermexwatch_readings.csv": Vendor.THERMEXWATCH,
+    "maintaflow_records.csv": Vendor.MAINTAFLOW,
+    "maintenance_work_orders.csv": Vendor.WORKORDERS,
+}
+
+
+def load_seed_csv(name: str) -> list[dict[str, str]]:
+    with (SEED_DIR / name).open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))

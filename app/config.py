@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # Larger batches are refused with 413; vendors should split them.
     max_records_per_batch: int = 1000
 
+    # MaintaFlow timestamps carry no timezone; this is the zone they are read in.
+    maintaflow_timezone: str = "UTC"
+
     def api_key_for(self, vendor: Vendor) -> str:
         return getattr(self, f"api_key_{vendor.value}")
 
