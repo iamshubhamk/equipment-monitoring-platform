@@ -15,6 +15,7 @@ RUN pip install ".[dev]"
 
 COPY alembic.ini ./
 COPY alembic ./alembic
+COPY scripts ./scripts
 COPY tests ./tests
 COPY data ./data
 

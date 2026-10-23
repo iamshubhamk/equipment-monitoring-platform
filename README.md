@@ -23,6 +23,54 @@ docker compose up --build
 - OpenAPI docs: http://localhost:8000/docs
 - Health check: http://localhost:8000/health
 
+This starts three containers: `db` (Postgres 16), `api` (runs migrations, loads reference
+data, serves HTTP) and `worker` (processes the job queue). `api` and `worker` share one
+image.
+
+## Loading the provided data
+
+With the stack running, load every seed CSV and every vendor sample through the public
+ingest API:
+
+```bash
+python scripts/seed.py
+```
+
+The script needs only the Python 3.12 standard library, so no virtualenv is required. It
+posts 21 batches, waits for the worker, and prints the attention view:
+
+```
+machine  line    status             lvl  reasons
+EQ-002   LINE-A  CRITICAL             4  TEMPERATURE_ALERT, TEMPERATURE_ABOVE_RATED, MAINTENANCE_OVERDUE, OPEN_WORK_ORDER
+EQ-005   LINE-D  WARNING              3  VIBRATION_ABOVE_RATED, VIBRATION_ALERT, INSPECTION_OBSERVATION, MAINTENANCE_DUE_SOON
+EQ-008   LINE-E  WARNING              3  INSPECTION_MAJOR_DEFECT, UNMAPPED_VENDOR_ALERT, OPEN_WORK_ORDER
+EQ-001   LINE-A  WATCH                1  INSPECTION_MINOR_DEFECT
+EQ-007   LINE-E  UNDER_MAINTENANCE    1  CALIBRATION_PENDING, OPEN_WORK_ORDER, ASSET_IN_MAINTENANCE, INACTIVE_WITH_OPEN_WORK_ORDER
+EQ-003   LINE-B  NORMAL               0
+EQ-004   LINE-C  NORMAL               0
+EQ-006   LINE-D  NORMAL               0
+```
+
+- **Options:** `--seed-only` loads just the CSVs. `--base-url` points the script at
+  another server.
+- **Without local Python:** run it inside the stack instead:
+  `docker compose run --rm api python scripts/seed.py --base-url http://api:8000`.
+- **Re-running is safe:** every batch has a fixed `Idempotency-Key`, so a second run
+  changes nothing and reports each batch as "already ingested".
+- **Starting over:** `docker compose down -v` deletes the database volume.
+
+Then explore:
+
+```bash
+curl localhost:8000/v1/summary
+curl localhost:8000/v1/machines/EQ-008
+curl "localhost:8000/v1/machines?needs_attention=true"
+curl localhost:8000/v1/machines/EQ-001/events
+```
+
+With a real clock every machine reads `"freshness": "STALE"`, because the sample data is
+from 2026-04-18. Freshness is computed against the current time, and tests pin the clock.
+
 ## Running tests
 
 Inside Docker (no local Python needed):
@@ -53,6 +101,8 @@ CSVs (`python -m app.reference_data`). Both steps are idempotent.
 | Path | Purpose |
 |---|---|
 | `app/` | Service code (API, normalization, jobs, derivation) |
+| `alembic/` | Database migrations |
+| `scripts/seed.py` | Loads the provided data through the ingest API |
 | `tests/` | Unit and integration tests |
 | `data/` | The provided assessment assets (reference CSVs, seed CSVs, vendor samples) |
 | `docs/` | Architecture diagram and design note _(TBD)_ |
