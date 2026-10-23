@@ -18,6 +18,7 @@ COPY alembic ./alembic
 COPY scripts ./scripts
 COPY tests ./tests
 COPY data ./data
+COPY docs ./docs
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

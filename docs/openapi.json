@@ -1,0 +1,1873 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Equipment Monitoring Service",
+    "description": "Ingests machine data from multiple vendors, normalizes it, and serves a per-machine attention view plus plant/line summaries.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Health",
+        "description": "Liveness check: the process is up and serving requests.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ingest/{vendor}": {
+      "post": {
+        "tags": [
+          "ingestion"
+        ],
+        "summary": "Ingest",
+        "description": "Accept a batch for background processing.\n\nOnly the envelope is checked here. Records are validated by the worker, and the\noutcome per record is available from the status URL.",
+        "operationId": "ingest_v1_ingest__vendor__post",
+        "parameters": [
+          {
+            "name": "vendor",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Vendor"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Retries with the same key return the original ingestion. If omitted, the SHA-256 of the canonical JSON body is used.",
+              "title": "Idempotency-Key"
+            },
+            "description": "Retries with the same key return the original ingestion. If omitted, the SHA-256 of the canonical JSON body is used."
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "The vendor's batch, in its own format.",
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid X-API-Key"
+          },
+          "409": {
+            "description": "Idempotency-Key reused with a different payload"
+          },
+          "413": {
+            "description": "Too many records in one batch"
+          },
+          "422": {
+            "description": "Body is not a usable batch envelope"
+          }
+        }
+      }
+    },
+    "/v1/ingestions/{ingestion_id}": {
+      "get": {
+        "tags": [
+          "ingestion"
+        ],
+        "summary": "Get Ingestion",
+        "description": "Processing status of an accepted batch: counts per outcome and its background job.",
+        "operationId": "get_ingestion_v1_ingestions__ingestion_id__get",
+        "parameters": [
+          {
+            "name": "ingestion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Ingestion Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown ingestion"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ingestions/{ingestion_id}/records": {
+      "get": {
+        "tags": [
+          "ingestion"
+        ],
+        "summary": "List Records",
+        "description": "The batch's records with their outcome. `?status=rejected` lists what was refused and why.",
+        "operationId": "list_records_v1_ingestions__ingestion_id__records_get",
+        "parameters": [
+          {
+            "name": "ingestion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Ingestion Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RecordStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "e.g. rejected",
+              "title": "Status"
+            },
+            "description": "e.g. rejected"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawRecordList"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown ingestion"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machines": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "List Machines",
+        "description": "Attention view of every machine, most urgent first.",
+        "operationId": "list_machines_v1_machines_get",
+        "parameters": [
+          {
+            "name": "plant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plant Id"
+            }
+          },
+          {
+            "name": "line_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Line Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "NORMAL",
+                    "WATCH",
+                    "WARNING",
+                    "CRITICAL",
+                    "UNDER_MAINTENANCE",
+                    "UNKNOWN"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "needs_attention",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Needs Attention"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machines/{machine_id}": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Get Machine",
+        "description": "One machine's derived status, the reasons behind it and the events they came from.",
+        "operationId": "get_machine_v1_machines__machine_id__get",
+        "parameters": [
+          {
+            "name": "machine_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Machine Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown machine"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machines/{machine_id}/events": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "List Machine Events",
+        "description": "The machine's normalized events, newest event time first, each linked to its raw record.",
+        "operationId": "list_machine_events_v1_machines__machine_id__events_get",
+        "parameters": [
+          {
+            "name": "machine_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Machine Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventList"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown machine"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/summary": {
+      "get": {
+        "tags": [
+          "summary"
+        ],
+        "summary": "Get Summary",
+        "description": "Plant/line overview: status counts, lines ranked by machines needing attention,\ncritical machines, and machines with stale, pending or failed processing.",
+        "operationId": "get_summary_v1_summary_get",
+        "parameters": [
+          {
+            "name": "plant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Summary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/dead-letters": {
+      "get": {
+        "tags": [
+          "dead letters"
+        ],
+        "summary": "List Dead Letters",
+        "description": "Jobs that failed permanently or ran out of attempts, newest first, with their last error.",
+        "operationId": "list_dead_letters_v1_dead_letters_get",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobOut"
+                  },
+                  "title": "Response List Dead Letters V1 Dead Letters Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/dead-letters/{job_id}/replay": {
+      "post": {
+        "tags": [
+          "dead letters"
+        ],
+        "summary": "Replay Dead Letter",
+        "description": "Re-queue a dead job with fresh attempts (after fixing whatever made it fail).\nRequires the operations X-API-Key.",
+        "operationId": "replay_dead_letter_v1_dead_letters__job_id__replay_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid operations key"
+          },
+          "404": {
+            "description": "Unknown job"
+          },
+          "409": {
+            "description": "Job is not dead, or an equivalent job is already queued"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BatchStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "completed",
+          "failed"
+        ],
+        "title": "BatchStatus"
+      },
+      "CriticalMachine": {
+        "properties": {
+          "machine_id": {
+            "type": "string",
+            "title": "Machine Id"
+          },
+          "plant_id": {
+            "type": "string",
+            "title": "Plant Id"
+          },
+          "line_id": {
+            "type": "string",
+            "title": "Line Id"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reason Codes"
+          },
+          "latest_relevant_event_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Relevant Event Time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "machine_id",
+          "plant_id",
+          "line_id",
+          "reason_codes",
+          "latest_relevant_event_time"
+        ],
+        "title": "CriticalMachine"
+      },
+      "EventList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EventOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "EventList"
+      },
+      "EventOut": {
+        "properties": {
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          },
+          "vendor": {
+            "$ref": "#/components/schemas/Vendor"
+          },
+          "source_record_id": {
+            "type": "string",
+            "title": "Source Record Id"
+          },
+          "ingestion_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Ingestion Id"
+          },
+          "raw_record_id": {
+            "type": "integer",
+            "title": "Raw Record Id"
+          },
+          "event_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Event Time"
+          },
+          "vendor_received_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor Received At"
+          },
+          "ingested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ingested At"
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Severity"
+          },
+          "temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature C"
+          },
+          "vibration_mm_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vibration Mm S"
+          },
+          "vibration_g": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vibration G"
+          },
+          "power_kw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power Kw"
+          },
+          "sensor_health": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sensor Health"
+          },
+          "signal_quality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Quality"
+          },
+          "machine_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine State"
+          },
+          "machine_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine Active"
+          },
+          "vendor_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor Confidence"
+          },
+          "inspection_result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inspection Result"
+          },
+          "maintenance_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maintenance Status"
+          },
+          "work_order_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Order Status"
+          },
+          "post_maintenance_check": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Maintenance Check"
+          },
+          "manual_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manual Confidence"
+          },
+          "attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Attributes"
+          },
+          "quality_flags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Quality Flags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "vendor",
+          "source_record_id",
+          "ingestion_id",
+          "raw_record_id",
+          "event_time",
+          "vendor_received_at",
+          "ingested_at",
+          "event_type",
+          "severity",
+          "temperature_c",
+          "vibration_mm_s",
+          "vibration_g",
+          "power_kw",
+          "sensor_health",
+          "signal_quality",
+          "machine_state",
+          "machine_active",
+          "vendor_confidence",
+          "inspection_result",
+          "maintenance_status",
+          "work_order_status",
+          "post_maintenance_check",
+          "manual_confidence",
+          "attributes",
+          "quality_flags"
+        ],
+        "title": "EventOut"
+      },
+      "EventRef": {
+        "properties": {
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          },
+          "vendor": {
+            "type": "string",
+            "title": "Vendor"
+          },
+          "source_record_id": {
+            "type": "string",
+            "title": "Source Record Id"
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type"
+          },
+          "event_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Event Time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "vendor",
+          "source_record_id",
+          "event_type",
+          "event_time"
+        ],
+        "title": "EventRef"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "IngestionAccepted": {
+        "properties": {
+          "ingestion_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Ingestion Id"
+          },
+          "vendor": {
+            "$ref": "#/components/schemas/Vendor"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BatchStatus"
+          },
+          "record_count": {
+            "type": "integer",
+            "title": "Record Count"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Received At"
+          },
+          "idempotent_replay": {
+            "type": "boolean",
+            "title": "Idempotent Replay",
+            "description": "True if this exact request was already accepted earlier; nothing new was stored."
+          },
+          "status_url": {
+            "type": "string",
+            "title": "Status Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ingestion_id",
+          "vendor",
+          "status",
+          "record_count",
+          "received_at",
+          "idempotent_replay",
+          "status_url"
+        ],
+        "title": "IngestionAccepted"
+      },
+      "IngestionStatus": {
+        "properties": {
+          "ingestion_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Ingestion Id"
+          },
+          "vendor": {
+            "$ref": "#/components/schemas/Vendor"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BatchStatus"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Received At"
+          },
+          "processed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Processed At"
+          },
+          "record_count": {
+            "type": "integer",
+            "title": "Record Count"
+          },
+          "accepted_count": {
+            "type": "integer",
+            "title": "Accepted Count"
+          },
+          "rejected_count": {
+            "type": "integer",
+            "title": "Rejected Count"
+          },
+          "duplicate_count": {
+            "type": "integer",
+            "title": "Duplicate Count"
+          },
+          "pending_count": {
+            "type": "integer",
+            "title": "Pending Count",
+            "description": "Records not processed yet."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Last processing error, if an attempt failed."
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "records_url": {
+            "type": "string",
+            "title": "Records Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ingestion_id",
+          "vendor",
+          "status",
+          "received_at",
+          "processed_at",
+          "record_count",
+          "accepted_count",
+          "rejected_count",
+          "duplicate_count",
+          "pending_count",
+          "error",
+          "job",
+          "records_url"
+        ],
+        "title": "IngestionStatus"
+      },
+      "JobOut": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "max_attempts": {
+            "type": "integer",
+            "title": "Max Attempts"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At",
+            "description": "When a queued job will next be tried."
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "kind",
+          "status",
+          "attempts",
+          "max_attempts",
+          "next_attempt_at",
+          "last_error",
+          "payload",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "JobOut"
+      },
+      "JobStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "succeeded",
+          "dead"
+        ],
+        "title": "JobStatus"
+      },
+      "LineSummary": {
+        "properties": {
+          "machine_count": {
+            "type": "integer",
+            "title": "Machine Count"
+          },
+          "needs_attention_count": {
+            "type": "integer",
+            "title": "Needs Attention Count"
+          },
+          "max_attention_level": {
+            "type": "integer",
+            "title": "Max Attention Level"
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Status Counts"
+          },
+          "machines_needing_attention": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Machines Needing Attention"
+          },
+          "plant_id": {
+            "type": "string",
+            "title": "Plant Id"
+          },
+          "line_id": {
+            "type": "string",
+            "title": "Line Id"
+          },
+          "line_name": {
+            "type": "string",
+            "title": "Line Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "machine_count",
+          "needs_attention_count",
+          "max_attention_level",
+          "status_counts",
+          "machines_needing_attention",
+          "plant_id",
+          "line_id",
+          "line_name"
+        ],
+        "title": "LineSummary"
+      },
+      "MachineList": {
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MachineView"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of",
+          "count",
+          "items"
+        ],
+        "title": "MachineList"
+      },
+      "MachineView": {
+        "properties": {
+          "machine_id": {
+            "type": "string",
+            "title": "Machine Id"
+          },
+          "plant_id": {
+            "type": "string",
+            "title": "Plant Id"
+          },
+          "line_id": {
+            "type": "string",
+            "title": "Line Id"
+          },
+          "machine_type": {
+            "type": "string",
+            "title": "Machine Type"
+          },
+          "criticality": {
+            "type": "string",
+            "title": "Criticality"
+          },
+          "asset_status": {
+            "type": "string",
+            "title": "Asset Status"
+          },
+          "derived_status": {
+            "type": "string",
+            "enum": [
+              "NORMAL",
+              "WATCH",
+              "WARNING",
+              "CRITICAL",
+              "UNDER_MAINTENANCE",
+              "UNKNOWN"
+            ],
+            "title": "Derived Status"
+          },
+          "needs_attention": {
+            "type": "boolean",
+            "title": "Needs Attention"
+          },
+          "attention_level": {
+            "type": "integer",
+            "title": "Attention Level",
+            "description": "Highest reason severity, 0 (none) to 4 (critical)."
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reason Codes"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/ReasonOut"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "latest_relevant_event_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Relevant Event Time",
+            "description": "Latest event behind a contributing reason (or the latest event if none)."
+          },
+          "latest_event_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Event Time"
+          },
+          "freshness": {
+            "type": "string",
+            "enum": [
+              "FRESH",
+              "STALE"
+            ],
+            "title": "Freshness"
+          },
+          "processing_status": {
+            "type": "string",
+            "enum": [
+              "UP_TO_DATE",
+              "PENDING",
+              "FAILED",
+              "NO_DATA"
+            ],
+            "title": "Processing Status",
+            "description": "UP_TO_DATE, PENDING (a recompute is queued/running), FAILED (last recompute was dead-lettered) or NO_DATA (no events yet)."
+          },
+          "last_processed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Processed At",
+            "description": "When this state was last recomputed."
+          },
+          "event_count": {
+            "type": "integer",
+            "title": "Event Count"
+          },
+          "source_event_refs": {
+            "items": {
+              "$ref": "#/components/schemas/EventRef"
+            },
+            "type": "array",
+            "title": "Source Event Refs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "machine_id",
+          "plant_id",
+          "line_id",
+          "machine_type",
+          "criticality",
+          "asset_status",
+          "derived_status",
+          "needs_attention",
+          "attention_level",
+          "reason_codes",
+          "reasons",
+          "latest_relevant_event_time",
+          "latest_event_time",
+          "freshness",
+          "processing_status",
+          "last_processed_at",
+          "event_count",
+          "source_event_refs"
+        ],
+        "title": "MachineView"
+      },
+      "PlantSummary": {
+        "properties": {
+          "machine_count": {
+            "type": "integer",
+            "title": "Machine Count"
+          },
+          "needs_attention_count": {
+            "type": "integer",
+            "title": "Needs Attention Count"
+          },
+          "max_attention_level": {
+            "type": "integer",
+            "title": "Max Attention Level"
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Status Counts"
+          },
+          "machines_needing_attention": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Machines Needing Attention"
+          },
+          "plant_id": {
+            "type": "string",
+            "title": "Plant Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "machine_count",
+          "needs_attention_count",
+          "max_attention_level",
+          "status_counts",
+          "machines_needing_attention",
+          "plant_id"
+        ],
+        "title": "PlantSummary"
+      },
+      "ProcessingSummary": {
+        "properties": {
+          "stale_machines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stale Machines"
+          },
+          "pending_machines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Pending Machines"
+          },
+          "failed_machines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Failed Machines"
+          },
+          "no_data_machines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "No Data Machines"
+          },
+          "ingestions_by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Ingestions By Status",
+            "description": "Across all plants."
+          },
+          "ingestions_with_rejections": {
+            "type": "integer",
+            "title": "Ingestions With Rejections",
+            "description": "Completed batches with at least one rejected record."
+          },
+          "dead_letter_jobs": {
+            "type": "integer",
+            "title": "Dead Letter Jobs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stale_machines",
+          "pending_machines",
+          "failed_machines",
+          "no_data_machines",
+          "ingestions_by_status",
+          "ingestions_with_rejections",
+          "dead_letter_jobs"
+        ],
+        "title": "ProcessingSummary"
+      },
+      "RawRecordList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RawRecordOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "RawRecordList"
+      },
+      "RawRecordOut": {
+        "properties": {
+          "record_index": {
+            "type": "integer",
+            "title": "Record Index"
+          },
+          "source_record_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reason Codes",
+            "description": "Why it was rejected, or what it duplicates."
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id",
+            "description": "Event created from it, or the event it duplicates."
+          },
+          "raw": {
+            "title": "Raw",
+            "description": "The record exactly as the vendor sent it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_index",
+          "source_record_id",
+          "status",
+          "reason_codes",
+          "event_id",
+          "raw"
+        ],
+        "title": "RawRecordOut"
+      },
+      "ReasonOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "severity": {
+            "type": "integer",
+            "title": "Severity",
+            "description": "0-4; 0 explains the status without adding attention."
+          },
+          "dimension": {
+            "type": "string",
+            "title": "Dimension"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "source_event_refs": {
+            "items": {
+              "$ref": "#/components/schemas/EventRef"
+            },
+            "type": "array",
+            "title": "Source Event Refs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "severity",
+          "dimension",
+          "message",
+          "confidence",
+          "source_event_refs"
+        ],
+        "title": "ReasonOut"
+      },
+      "RecordStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "accepted",
+          "rejected",
+          "duplicate"
+        ],
+        "title": "RecordStatus"
+      },
+      "Summary": {
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "plant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plant Id"
+          },
+          "machine_count": {
+            "type": "integer",
+            "title": "Machine Count"
+          },
+          "needs_attention_count": {
+            "type": "integer",
+            "title": "Needs Attention Count"
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Status Counts"
+          },
+          "plants": {
+            "items": {
+              "$ref": "#/components/schemas/PlantSummary"
+            },
+            "type": "array",
+            "title": "Plants"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/LineSummary"
+            },
+            "type": "array",
+            "title": "Lines",
+            "description": "Most machines needing attention first."
+          },
+          "critical_machines": {
+            "items": {
+              "$ref": "#/components/schemas/CriticalMachine"
+            },
+            "type": "array",
+            "title": "Critical Machines"
+          },
+          "processing": {
+            "$ref": "#/components/schemas/ProcessingSummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of",
+          "plant_id",
+          "machine_count",
+          "needs_attention_count",
+          "status_counts",
+          "plants",
+          "lines",
+          "critical_machines",
+          "processing"
+        ],
+        "title": "Summary"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "Vendor": {
+        "type": "string",
+        "enum": [
+          "pulseforge",
+          "thermexwatch",
+          "maintaflow",
+          "workorders"
+        ],
+        "title": "Vendor"
+      }
+    }
+  }
+}
