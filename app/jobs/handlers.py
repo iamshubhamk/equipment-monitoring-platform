@@ -8,14 +8,14 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.derivation.service import recompute_machine
 from app.jobs.errors import PermanentError
 from app.jobs.queue import NORMALIZE_BATCH, RECOMPUTE_MACHINE, enqueue_unique
-from app.models import BatchStatus, Event, IngestionBatch, Machine, RawRecord, RecordStatus
+from app.models import BatchStatus, Event, IngestionBatch, Job, JobStatus, Machine, RawRecord, RecordStatus
 from app.normalization import NORMALIZERS
 from app.normalization.canonical import MachineRef, NormalizationContext, NormalizedEvent
 
@@ -138,6 +138,31 @@ def recompute(session: Session, payload: dict[str, Any], now: datetime) -> None:
     if not machine_id:
         raise PermanentError(f"invalid job payload: {payload}")
     recompute_machine(session, machine_id, now)
+
+
+class ReplayConflict(Exception):
+    pass
+
+
+def replay_dead_job(session: Session, job: Job) -> None:
+    """Put a dead-lettered job back in the queue with a fresh set of attempts.
+
+    last_error is kept so the history of why it died stays visible.
+    """
+    if job.status != JobStatus.DEAD:
+        raise ReplayConflict(f"job {job.id} is {job.status}, only dead jobs can be replayed")
+    if job.dedupe_key and session.scalar(
+        select(Job.id).where(Job.dedupe_key == job.dedupe_key, Job.status == JobStatus.QUEUED)
+    ):
+        raise ReplayConflict(f"an equivalent job ({job.dedupe_key}) is already queued")
+    job.status = JobStatus.QUEUED
+    job.attempts = 0
+    job.run_after = func.now()
+    job.finished_at = None
+    if job.kind == NORMALIZE_BATCH:
+        batch = _batch(session, job.payload)
+        batch.status = BatchStatus.QUEUED
+        batch.processed_at = None
 
 
 HANDLERS: dict[str, Handler] = {

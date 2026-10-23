@@ -45,3 +45,10 @@ SEED_FILES = {
 def load_seed_csv(name: str) -> list[dict[str, str]]:
     with (SEED_DIR / name).open(newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
+
+
+# Everything provided: every seed CSV as one batch, then every sample batch.
+ALL_BATCHES = [
+    *[(vendor, {VENDORS[vendor].records_key: load_seed_csv(name)}) for name, vendor in SEED_FILES.items()],
+    *[(vendor, batch) for _, vendor, batch in ALL_SAMPLE_BATCHES],
+]

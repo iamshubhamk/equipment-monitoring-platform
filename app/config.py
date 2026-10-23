@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     api_key_thermexwatch: str = "dev-thermexwatch-key"
     api_key_maintaflow: str = "dev-maintaflow-key"
     api_key_workorders: str = "dev-workorders-key"
+    # Operator key for actions that change processing state (dead-letter replay).
+    api_key_ops: str = "dev-ops-key"
 
     # Larger batches are refused with 413; vendors should split them.
     max_records_per_batch: int = 1000

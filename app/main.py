@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.api import ingest
+from app.api import dead_letters, ingest, ingestions, machines, summary
 
 
 def create_app() -> FastAPI:
@@ -17,6 +17,10 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(ingest.router)
+    app.include_router(ingestions.router)
+    app.include_router(machines.router)
+    app.include_router(summary.router)
+    app.include_router(dead_letters.router)
     return app
 
 

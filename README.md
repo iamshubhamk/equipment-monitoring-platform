@@ -103,6 +103,66 @@ curl -X POST localhost:8000/v1/ingest/thermexwatch \
 | `413` | More than `MAX_RECORDS_PER_BATCH` records (default 1000) |
 | `422` | Body is not a JSON object, the record list is missing/empty/not a list, or the envelope names a different vendor |
 
+### Processing status
+
+| Endpoint | Returns |
+|---|---|
+| `GET /v1/ingestions/{id}` | Batch status (`queued` / `completed` / `failed`), counts (accepted, rejected, duplicate, pending), last error, and its job (attempts, next retry time) |
+| `GET /v1/ingestions/{id}/records?status=rejected` | Each record's outcome, reason codes, the event it created or duplicates, and the raw record as sent. Paginated with `limit` / `offset` |
+
+### Machine attention view
+
+| Endpoint | Returns |
+|---|---|
+| `GET /v1/machines` | Every machine in the reference data, most urgent first. Filters: `plant_id`, `line_id`, `status`, `needs_attention` |
+| `GET /v1/machines/{machine_id}` | One machine's view (below) |
+| `GET /v1/machines/{machine_id}/events` | Its normalized events, newest event time first, each with `ingestion_id`, `raw_record_id`, quality flags and vendor attributes |
+
+A machine view carries the fields `expected_output_context.md` asks for:
+
+```json
+{
+  "machine_id": "EQ-002", "plant_id": "PLANT_01", "line_id": "LINE-A",
+  "derived_status": "CRITICAL", "needs_attention": true, "attention_level": 4,
+  "reason_codes": ["TEMPERATURE_ALERT", "TEMPERATURE_ABOVE_RATED", "MAINTENANCE_OVERDUE", "OPEN_WORK_ORDER"],
+  "reasons": [{"code": "TEMPERATURE_ALERT", "severity": 4, "dimension": "temperature",
+               "message": "thermexwatch reported TEMP_CRIT (severity 4)", "confidence": null,
+               "source_event_refs": [{"event_id": 12, "vendor": "thermexwatch", "source_record_id": "TW-8803", "...": "..."}]}],
+  "latest_relevant_event_time": "2026-04-18T08:49:00Z",
+  "freshness": "FRESH", "processing_status": "UP_TO_DATE",
+  "last_processed_at": "...", "source_event_refs": ["..."]
+}
+```
+
+- `processing_status` comes from the machine's latest recompute job:
+  - `PENDING`: a recompute is queued or running;
+  - `FAILED`: the last recompute was dead-lettered;
+  - `NO_DATA`: no events yet;
+  - otherwise `UP_TO_DATE`.
+- A machine with no events yet is listed as `UNKNOWN`, not left out.
+
+### Plant / line summary
+
+`GET /v1/summary?plant_id=PLANT_01` (omit `plant_id` for all plants) answers the
+questions in `expected_output_context.md`:
+
+| Question | Field |
+|---|---|
+| How many machines are in each status? | `status_counts`, per plant in `plants[]`, per line in `lines[]` |
+| Which lines have the most machines needing attention? | `lines[]`, sorted by `needs_attention_count`, then highest attention level |
+| Which machines are critical? | `critical_machines[]` with reason codes |
+| Any stale, failed or partially processed state? | `processing`: stale / pending / failed / no-data machines, ingestions by status, batches with rejected records, dead-letter count |
+
+### Dead letters
+
+| Endpoint | |
+|---|---|
+| `GET /v1/dead-letters?kind=` | Dead jobs, newest first, with payload and last error |
+| `POST /v1/dead-letters/{job_id}/replay` | Re-queue a dead job with fresh attempts (`202`). Needs the operations key (`X-API-Key: dev-ops-key`, set with `API_KEY_OPS`). Returns `409` if the job isn't dead or an equivalent job is already queued |
+
+Replaying a dead `normalize_batch` sets its batch back to `queued`; its raw records were
+kept `pending`, so they are processed from scratch.
+
 ## Assumptions
 
 Each assumption is recorded when the code that depends on it is written.
@@ -312,6 +372,19 @@ reset anything.
 - Thresholds are constants in `rules.py`. Per-machine-type thresholds would be the next step.
 - Changing `asset_reference.csv` doesn't trigger recomputes. They happen when new events
   arrive.
+
+### Read APIs
+- Read endpoints have no authentication: they are assumed to sit on an internal network
+  behind a gateway. Only dead-letter replay, which changes processing state, needs a key.
+  In production all of it would go behind the platform's auth (SSO / service tokens).
+- The machine list and summary read every machine at once (8 here). With thousands of
+  machines they would need pagination, and the summary would be computed with SQL `GROUP BY`
+  or a materialised table rather than in Python.
+- Ingestion counts in the summary cover all plants: a batch's plant isn't known reliably
+  until its records are normalized.
+- A batch has no `processing` status: it is normalized in one transaction, so it goes
+  straight from `queued` to `completed` or `failed`. Migration 0002 removed the unused value.
+  Retry progress is reported through the batch's job (`attempts`, `next_attempt_at`).
 
 ## Trade-offs
 

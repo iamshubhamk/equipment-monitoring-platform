@@ -68,8 +68,9 @@ class Vendor(enum.StrEnum):
 
 
 class BatchStatus(enum.StrEnum):
+    # A batch is normalized in one transaction, so it goes straight from queued to
+    # completed (or failed once its job is dead-lettered). Retries show on its job.
     QUEUED = "queued"
-    PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
 

@@ -9,15 +9,9 @@ import pytest
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.models import JobStatus, Job, MachineState
-from app.vendors import VENDORS
-from tests.samples import ALL_SAMPLE_BATCHES, SEED_FILES, load_seed_csv
+from app.models import Job, JobStatus, MachineState
+from tests.samples import ALL_BATCHES
 from tests.test_worker import drain
-
-ALL_BATCHES = [
-    *[(vendor, {VENDORS[vendor].records_key: load_seed_csv(name)}) for name, vendor in SEED_FILES.items()],
-    *[(vendor, batch) for _, vendor, batch in ALL_SAMPLE_BATCHES],
-]
 
 EXPECTED_STATUS = {
     "EQ-001": "WATCH",
