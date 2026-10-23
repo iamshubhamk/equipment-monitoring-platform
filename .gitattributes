@@ -1,0 +1,3 @@
+# Keep LF line endings in the repo and working copy; files run inside Linux containers.
+* text=auto eol=lf
+*.pdf binary

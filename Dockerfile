@@ -13,6 +13,8 @@ COPY app ./app
 # Dev extras are included so the test suite can run inside the container.
 RUN pip install ".[dev]"
 
+COPY alembic.ini ./
+COPY alembic ./alembic
 COPY tests ./tests
 COPY data ./data
 

@@ -17,6 +17,11 @@ services:
 
   api:
     build: .
+    # Migrate and load reference data (both idempotent) before serving.
+    command: >
+      sh -c "alembic upgrade head
+      && python -m app.reference_data
+      && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/equipment
     ports:
