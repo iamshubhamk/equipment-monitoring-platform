@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Machine Attention</title>
+<!--
+  Read-only dashboard over the public read APIs (/v1/summary, /v1/machines, ...).
+  Plain HTML + JS, no build step and no external resources. All vendor-provided text is
+  inserted with textContent, never as HTML.
+-->
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --text: #1d2330; --muted: #667085; --border: #e3e6eb;
+    --normal: #2e7d4f; --watch: #b7791f; --warning: #c4511c; --critical: #c62828;
+    --maint: #3b62c4; --unknown: #7a8090; --row-hover: #f0f3f8; --selected: #e6edfb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1b1f27; --text: #e6e8ec; --muted: #9aa3b2; --border: #2c323d;
+      --normal: #4caf7a; --watch: #e0a83a; --warning: #ec7a46; --critical: #ef5350;
+      --maint: #6f93f0; --unknown: #8b92a3; --row-hover: #222833; --selected: #26324a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+           padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  header h1 { font-size: 18px; margin: 0 auto 0 0; }
+  header .meta { color: var(--muted); font-size: 13px; }
+  select, button { font: inherit; color: var(--text); background: var(--panel);
+                   border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; }
+  button { cursor: pointer; }
+  main { padding: 16px 20px; display: grid; gap: 16px; max-width: 1400px; margin: 0 auto; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  .panel h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); font-weight: 600;
+              text-transform: uppercase; letter-spacing: .04em; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+  .tile { border: 1px solid var(--border); border-left: 4px solid var(--c); border-radius: 8px; padding: 8px 12px; }
+  .tile .n { font-size: 26px; font-weight: 600; }
+  .tile .l { color: var(--muted); font-size: 12px; }
+  .cols { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  tbody tr.clickable { cursor: pointer; }
+  tbody tr.clickable:hover { background: var(--row-hover); }
+  tbody tr.selected { background: var(--selected); }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+           color: #fff; background: var(--c); white-space: nowrap; }
+  .muted { color: var(--muted); }
+  .nowrap { white-space: nowrap; }
+  .codes { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  ul.plain { list-style: none; margin: 0; padding: 0; }
+  ul.plain li { padding: 4px 0; }
+  .reason { border-left: 3px solid var(--c); padding: 6px 10px; margin: 6px 0; background: var(--bg); border-radius: 0 6px 6px 0; }
+  .reason .refs { font-size: 12px; color: var(--muted); }
+  .error { color: var(--critical); }
+  .s-NORMAL { --c: var(--normal); } .s-WATCH { --c: var(--watch); } .s-WARNING { --c: var(--warning); }
+  .s-CRITICAL { --c: var(--critical); } .s-UNDER_MAINTENANCE { --c: var(--maint); } .s-UNKNOWN { --c: var(--unknown); }
+  .sev-0 { --c: var(--maint); } .sev-1, .sev-2 { --c: var(--watch); } .sev-3 { --c: var(--warning); } .sev-4 { --c: var(--critical); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Machine Attention</h1>
+  <label class="meta">Plant <select id="plant"><option value="">All plants</option></select></label>
+  <span class="meta" id="asof"></span>
+  <button id="refresh" type="button">Refresh</button>
+</header>
+<main>
+  <p id="error" class="error" hidden></p>
+
+  <section class="panel">
+    <h2>Machines by status</h2>
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <div class="cols">
+    <section class="panel">
+      <h2>Machines (most urgent first)</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Machine</th><th>Line</th><th>Status</th><th>Level</th><th>Reasons</th><th>Freshness</th><th>Processing</th></tr></thead>
+        <tbody id="machines"></tbody>
+      </table></div>
+    </section>
+
+    <div style="display:grid; gap:16px; align-content:start; min-width:0">
+      <section class="panel">
+        <h2>Lines needing attention</h2>
+        <table>
+          <thead><tr><th>Line</th><th>Needs attention</th><th>Machines</th></tr></thead>
+          <tbody id="lines"></tbody>
+        </table>
+      </section>
+      <section class="panel">
+        <h2>Processing</h2>
+        <ul class="plain" id="processing"></ul>
+      </section>
+    </div>
+  </div>
+
+  <section class="panel" id="detail" hidden>
+    <h2 id="detail-title"></h2>
+    <div class="cols">
+      <div>
+        <p id="detail-meta" class="muted"></p>
+        <div id="detail-reasons"></div>
+      </div>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Event time (UTC)</th><th>Source</th><th>Type</th><th>Sev</th><th>Flags</th></tr></thead>
+          <tbody id="detail-events"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const STATUSES = ["CRITICAL", "WARNING", "WATCH", "UNDER_MAINTENANCE", "NORMAL", "UNKNOWN"];
+const $ = (id) => document.getElementById(id);
+let selected = null;
+
+// Build elements with textContent only, so vendor text can never inject HTML.
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props)) {
+    if (key === "class") node.className = value;
+    else if (key === "text") node.textContent = value;
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value);
+  }
+  for (const child of children) node.append(child);
+  return node;
+}
+
+const badge = (status) => el("span", { class: `badge s-${status}`, text: status.replace("_", " ") });
+const time = (iso) => (iso ? iso.replace("T", " ").replace(/(\.\d+)?(Z|\+00:00)$/, "") : "—");
+
+async function getJson(path) {
+  const response = await fetch(path, { headers: { Accept: "application/json" } });
+  if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
+function renderTiles(summary) {
+  $("tiles").replaceChildren(
+    ...STATUSES.map((s) =>
+      el("div", { class: `tile s-${s}` },
+        el("div", { class: "n", text: String(summary.status_counts[s] ?? 0) }),
+        el("div", { class: "l", text: s.replace("_", " ") })))
+  );
+}
+
+function renderMachines(machines) {
+  $("machines").replaceChildren(
+    ...machines.map((m) =>
+      el("tr", {
+          class: "clickable" + (m.machine_id === selected ? " selected" : ""),
+          onclick: () => showMachine(m.machine_id, true),
+        },
+        el("td", { class: "nowrap", text: m.machine_id }),
+        el("td", { class: "nowrap", text: m.line_id }),
+        el("td", {}, badge(m.derived_status)),
+        el("td", { text: String(m.attention_level) }),
+        el("td", { class: "codes", text: m.reason_codes.join(", ") || "—" }),
+        el("td", { class: m.freshness === "STALE" ? "muted" : "", text: m.freshness }),
+        el("td", { class: m.processing_status === "UP_TO_DATE" ? "muted" : "", text: m.processing_status })))
+  );
+}
+
+function renderLines(summary) {
+  $("lines").replaceChildren(
+    ...summary.lines.map((line) =>
+      el("tr", {},
+        el("td", { text: `${line.line_id} · ${line.line_name}` }),
+        el("td", { text: String(line.needs_attention_count) }),
+        el("td", { class: "codes", text: line.machines_needing_attention.join(", ") || "—" })))
+  );
+}
+
+function renderProcessing(summary) {
+  const p = summary.processing;
+  const item = (label, value) => el("li", {}, el("span", { class: "muted", text: label + ": " }), value);
+  const ingestions = Object.entries(p.ingestions_by_status).map(([k, v]) => `${v} ${k}`).join(", ");
+  $("processing").replaceChildren(
+    item("Critical", summary.critical_machines.map((m) => m.machine_id).join(", ") || "none"),
+    item("Stale", p.stale_machines.join(", ") || "none"),
+    item("Recompute pending", p.pending_machines.join(", ") || "none"),
+    item("Recompute failed", p.failed_machines.join(", ") || "none"),
+    item("Ingestions", ingestions),
+    item("Batches with rejected records", String(p.ingestions_with_rejections)),
+    item("Dead-letter jobs", String(p.dead_letter_jobs)),
+  );
+}
+
+async function showMachine(id, scroll = false) {
+  selected = id;
+  for (const row of $("machines").children) row.classList.toggle("selected", row.firstChild.textContent === id);
+  const [m, events] = await Promise.all([
+    getJson(`/v1/machines/${encodeURIComponent(id)}`),
+    getJson(`/v1/machines/${encodeURIComponent(id)}/events?limit=25`),
+  ]);
+  $("detail").hidden = false;
+  $("detail-title").replaceChildren(`${m.machine_id} · ${m.machine_type} · ${m.plant_id} / ${m.line_id} `, badge(m.derived_status));
+  $("detail-meta").textContent =
+    `Attention level ${m.attention_level} · latest relevant event ${time(m.latest_relevant_event_time)} · ` +
+    `${m.freshness} · processing ${m.processing_status} · last processed ${time(m.last_processed_at)} · ${m.event_count} events`;
+  $("detail-reasons").replaceChildren(
+    ...(m.reasons.length ? m.reasons : [{ code: "NO_REASONS", severity: 0, message: "Nothing needs attention.", source_event_refs: [] }])
+      .map((r) =>
+        el("div", { class: `reason sev-${r.severity}` },
+          el("div", {}, el("strong", { class: "codes", text: r.code }), ` · severity ${r.severity} · ${r.message}`),
+          el("div", { class: "refs", text: r.source_event_refs.length
+            ? "from " + r.source_event_refs.map((ref) => `${ref.vendor} ${ref.source_record_id} @ ${time(ref.event_time)}`).join("; ")
+            : "" })))
+  );
+  $("detail-events").replaceChildren(
+    ...events.items.map((e) =>
+      el("tr", {},
+        el("td", { class: "nowrap", text: time(e.event_time) }),
+        el("td", { text: `${e.vendor} ${e.source_record_id}` }),
+        el("td", { text: e.attributes.vendor_event_type ? `${e.event_type} (${e.attributes.vendor_event_type})` : e.event_type }),
+        el("td", { text: e.severity ?? "—" }),
+        el("td", { class: "codes", text: e.quality_flags.join(", ") || "—" })))
+  );
+  if (scroll) $("detail").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function refresh() {
+  const plant = $("plant").value;
+  const query = plant ? `?plant_id=${encodeURIComponent(plant)}` : "";
+  try {
+    const [summary, machines] = await Promise.all([getJson(`/v1/summary${query}`), getJson(`/v1/machines${query}`)]);
+    if ($("plant").options.length === 1) {
+      for (const p of summary.plants) $("plant").append(el("option", { value: p.plant_id, text: p.plant_id }));
+    }
+    $("asof").textContent = `as of ${time(summary.as_of)} UTC`;
+    renderTiles(summary);
+    renderMachines(machines.items);
+    renderLines(summary);
+    renderProcessing(summary);
+    if (selected) await showMachine(selected);
+    $("error").hidden = true;
+  } catch (err) {
+    $("error").textContent = `Could not load data: ${err.message}`;
+    $("error").hidden = false;
+  }
+}
+
+$("refresh").addEventListener("click", refresh);
+$("plant").addEventListener("change", () => { selected = null; $("detail").hidden = true; refresh(); });
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>

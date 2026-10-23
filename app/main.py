@@ -1,6 +1,11 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 
 from app.api import dead_letters, ingest, ingestions, machines, summary
+
+DASHBOARD = Path(__file__).parent / "static" / "dashboard.html"
 
 
 def create_app() -> FastAPI:
@@ -15,6 +20,11 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         """Liveness check: the process is up and serving requests."""
         return {"status": "ok"}
+
+    @app.get("/dashboard", include_in_schema=False)
+    def dashboard() -> FileResponse:
+        """Read-only page over the read APIs; not part of the API contract."""
+        return FileResponse(DASHBOARD, media_type="text/html")
 
     app.include_router(ingest.router)
     app.include_router(ingestions.router)

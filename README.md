@@ -57,7 +57,7 @@ EQ-006   LINE-D  NORMAL               0
   changes nothing and reports each batch as "already ingested".
 - **Starting over:** `docker compose down -v` deletes the database volume.
 
-Then explore:
+Then open the dashboard at **http://localhost:8000/dashboard**, or explore the API directly:
 
 ```bash
 curl localhost:8000/v1/summary
@@ -68,6 +68,21 @@ curl localhost:8000/v1/machines/EQ-001/events
 
 With a real clock every machine reads `"freshness": "STALE"`, because the sample data is
 from 2026-04-18. Freshness is computed against the current time, and tests pin the clock.
+
+### Dashboard
+
+`/dashboard` is one static, read-only HTML page (`app/static/dashboard.html`). It uses
+plain JavaScript and only the public read APIs, with no build step, framework or external
+resources. It shows:
+- status counts;
+- machines, most urgent first;
+- lines ranked by machines needing attention;
+- processing health;
+- for a clicked machine, its reasons with their source records and its latest events.
+
+It has a plant filter and refreshes every 15 seconds. All vendor-supplied text is inserted
+as text, never as HTML, so a malicious technician note can't inject script. It is excluded
+from the OpenAPI contract.
 
 ## Running tests
 
@@ -99,6 +114,7 @@ CSVs (`python -m app.reference_data`). Both steps are idempotent.
 | Path | Purpose |
 |---|---|
 | `app/` | Service code (API, normalization, jobs, derivation) |
+| `app/static/dashboard.html` | Optional read-only dashboard served at `/dashboard` |
 | `alembic/` | Database migrations |
 | `scripts/seed.py` | Loads the provided data through the ingest API |
 | `tests/` | Unit and integration tests |
