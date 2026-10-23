@@ -13,11 +13,14 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
+from app.db import get_session
+from app.main import create_app
 from app.models import Base
 from app.reference_data import load_reference_data
 
@@ -77,3 +80,18 @@ def db_session(engine: Engine) -> Iterator[Session]:
 @pytest.fixture
 def reference_data(db_session: Session) -> None:
     load_reference_data(db_session, DATA_DIR)
+
+
+@pytest.fixture
+def client(engine: Engine, db_session: Session) -> Iterator[TestClient]:
+    """API client whose requests use the test database (each request its own session)."""
+    make_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    def test_session() -> Iterator[Session]:
+        with make_session() as session:
+            yield session
+
+    app = create_app()
+    app.dependency_overrides[get_session] = test_session
+    with TestClient(app) as client:
+        yield client

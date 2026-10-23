@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 
+from app.api import ingest
+
 
 def create_app() -> FastAPI:
     app = FastAPI(
@@ -14,6 +16,7 @@ def create_app() -> FastAPI:
         """Liveness check: the process is up and serving requests."""
         return {"status": "ok"}
 
+    app.include_router(ingest.router)
     return app
 
 
