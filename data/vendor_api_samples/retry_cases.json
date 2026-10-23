@@ -1,0 +1,65 @@
+{
+  "pulseforge": {
+    "vendor": "PulseForge",
+    "plant_id": "PLANT_02",
+    "batch_generated_at": "2026-04-18T08:50:00Z",
+    "events": [
+      {
+        "event_id": "PF-1501",
+        "machine_id": "EQ-005",
+        "line_id": "LINE-D",
+        "event_time": "2026-04-18T08:47:12Z",
+        "event_type": "HIGH_VIBRATION",
+        "severity": "medium",
+        "vibration_mm_s": 8.8,
+        "temperature_c": 80.5,
+        "machine_state": "running",
+        "sensor_health": 0.91,
+        "vendor_confidence": 0.82
+      },
+      {
+        "event_id": "PF-1502",
+        "machine_id": "EQ-005",
+        "line_id": null,
+        "event_time": "bad-time",
+        "event_type": "TEMP_SPIKE",
+        "severity": "critical",
+        "vibration_mm_s": 7.0,
+        "temperature_c": 94.2,
+        "machine_state": "running",
+        "sensor_health": 0.77,
+        "vendor_confidence": 0.79
+      }
+    ]
+  },
+  "maintaflow": {
+    "provider_name": "MaintaFlow",
+    "factory_id": "PLANT_01",
+    "records": [
+      {
+        "record_id": "MF-901",
+        "machine_ref": "EQ-002",
+        "line_ref": "LINE-A",
+        "recorded_at": "2026/04/18 08:49:00",
+        "record_type": "maintenance_update",
+        "inspection_result": null,
+        "maintenance_status": "overdue",
+        "days_since_last_service": 47,
+        "technician_note": "Fan still unavailable; keep watch",
+        "manual_confidence": "medium"
+      },
+      {
+        "record_id": "MF-902",
+        "machine_ref": "",
+        "line_ref": "LINE-A",
+        "recorded_at": "2026/04/18 08:49:20",
+        "record_type": "inspection",
+        "inspection_result": "minor_defect_found",
+        "maintenance_status": "not_due",
+        "days_since_last_service": 15,
+        "technician_note": "Asset label unreadable",
+        "manual_confidence": "low"
+      }
+    ]
+  }
+}

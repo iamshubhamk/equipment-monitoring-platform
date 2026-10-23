@@ -1,0 +1,5 @@
+work_order_id,plant_id,machine_id,line_id,opened_at,closed_at,maintenance_type,trigger_source,status,downtime_minutes,post_maintenance_check,notes
+WO-1001,PLANT_01,EQ-002,LINE-A,2026-04-18T08:07:00Z,,cooling_system,sensor_alert,open,0,pending,Work order created after temperature spike
+WO-1002,PLANT_01,EQ-004,LINE-C,2026-04-18T07:35:00Z,2026-04-18T08:10:00Z,power_check,operator_report,closed,22,passed,Power drop investigated and cleared
+WO-1003,PLANT_02,EQ-008,LINE-E,2026-04-18T07:25:00Z,,heat_shield,inspection,open,0,pending,Open work order from inspection defect
+WO-1004,PLANT_02,EQ-007,LINE-E,2026-04-18T06:50:00Z,,sensor_recalibration,scheduled_service,open,0,pending,Sensor calibration still pending

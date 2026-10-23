@@ -1,0 +1,7 @@
+record_id,provider_name,factory_id,machine_ref,line_ref,recorded_at,record_type,inspection_result,maintenance_status,days_since_last_service,technician_note,manual_confidence
+MF-501,MaintaFlow,PLANT_01,EQ-001,LINE-A,2026/04/18 08:14:05,inspection,minor_defect_found,not_due,18.0,Belt wear visible; machine still operational,medium
+MF-502,MaintaFlow,PLANT_01,EQ-004,C,2026/04/18 07:40:00,operator_note,,unknown,,Intermittent noise reported during warmup,low
+MF-503,MaintaFlow,PLANT_01,EQ-002,LINE-A,2026/04/18 08:05:10,maintenance_update,,overdue,46.0,Cooling fan replacement recommended,high
+MF-504,MaintaFlow,PLANT_02,EQ-005,LINE-D,2026/04/18 08:03:00,inspection,passed_with_observation,due_soon,27.0,Vibration slightly above last week's baseline,medium
+MF-505,MaintaFlow,PLANT_02,EQ-008,LINE-E,2026/04/18 07:20:00,inspection,major_defect_found,not_due,9.0,Heat shield loose; monitor continuously,high
+MF-506,MaintaFlow,PLANT_02,EQ-007,LINE-E,2026/04/18 06:55:00,calibration,calibration_pending,not_due,14.0,Sensor package awaiting recalibration,medium

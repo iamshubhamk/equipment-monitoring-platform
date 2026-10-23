@@ -1,0 +1,30 @@
+{
+  "provider_name": "MaintaFlow",
+  "factory_id": "PLANT_01",
+  "records": [
+    {
+      "record_id": "MF-501",
+      "machine_ref": "EQ-001",
+      "line_ref": "LINE-A",
+      "recorded_at": "2026/04/18 08:14:05",
+      "record_type": "inspection",
+      "inspection_result": "minor_defect_found",
+      "maintenance_status": "not_due",
+      "days_since_last_service": 18,
+      "technician_note": "Belt wear visible; machine still operational",
+      "manual_confidence": "medium"
+    },
+    {
+      "record_id": "MF-502",
+      "machine_ref": "EQ-004",
+      "line_ref": "C",
+      "recorded_at": "2026/04/18 07:40:00",
+      "record_type": "operator_note",
+      "inspection_result": null,
+      "maintenance_status": "unknown",
+      "days_since_last_service": null,
+      "technician_note": "Intermittent noise reported during warmup",
+      "manual_confidence": "low"
+    }
+  ]
+}

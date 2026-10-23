@@ -1,0 +1,33 @@
+{
+  "source": "ThermexWatch",
+  "site_code": "PLANT_01",
+  "response_time_epoch_ms": 1776499560000,
+  "readings": [
+    {
+      "readingId": "TW-8801",
+      "assetCode": "EQ-001",
+      "productionLine": "A",
+      "timestampMs": 1776499152000,
+      "alertCode": "VIB_WARN",
+      "level": 4,
+      "vibration_g": 0.81,
+      "temperature_f": 181.2,
+      "power_kw": 37.8,
+      "is_active": true,
+      "signal_quality": "GOOD"
+    },
+    {
+      "readingId": "TW-8802",
+      "assetCode": "EQ-003",
+      "productionLine": "B",
+      "timestampMs": 1776499010000,
+      "alertCode": "OK",
+      "level": 1,
+      "vibration_g": 0.12,
+      "temperature_f": 138.0,
+      "power_kw": 18.2,
+      "is_active": true,
+      "signal_quality": "FAIR"
+    }
+  ]
+}

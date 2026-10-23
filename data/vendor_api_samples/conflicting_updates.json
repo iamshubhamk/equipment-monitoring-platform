@@ -1,0 +1,60 @@
+{
+  "pulseforge": {
+    "vendor": "PulseForge",
+    "plant_id": "PLANT_02",
+    "batch_generated_at": "2026-04-18T08:42:00Z",
+    "events": [
+      {
+        "event_id": "PF-1401",
+        "machine_id": "EQ-008",
+        "line_id": "LINE-E",
+        "event_time": "2026-04-18T08:39:10Z",
+        "event_type": "RECOVERY_SIGNAL",
+        "severity": "low",
+        "vibration_mm_s": 4.0,
+        "temperature_c": 70.0,
+        "machine_state": "running",
+        "sensor_health": 0.93,
+        "vendor_confidence": 0.88
+      }
+    ]
+  },
+  "thermexwatch": {
+    "source": "ThermexWatch",
+    "site_code": "PLANT_02",
+    "response_time_epoch_ms": 1776501000000,
+    "readings": [
+      {
+        "readingId": "TW-9921",
+        "assetCode": "EQ-008",
+        "productionLine": "E",
+        "timestampMs": 1776500950000,
+        "alertCode": "TEMP_CRIT",
+        "level": 5,
+        "vibration_g": 0.36,
+        "temperature_f": 201.0,
+        "power_kw": 34.6,
+        "is_active": true,
+        "signal_quality": "GOOD"
+      }
+    ]
+  },
+  "maintaflow": {
+    "provider_name": "MaintaFlow",
+    "factory_id": "PLANT_02",
+    "records": [
+      {
+        "record_id": "MF-801",
+        "machine_ref": "EQ-008",
+        "line_ref": "LINE-E",
+        "recorded_at": "2026/04/18 08:41:00",
+        "record_type": "inspection",
+        "inspection_result": "major_defect_found",
+        "maintenance_status": "not_due",
+        "days_since_last_service": 10,
+        "technician_note": "Heat shield still loose despite lower readings",
+        "manual_confidence": "high"
+      }
+    ]
+  }
+}

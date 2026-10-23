@@ -1,0 +1,68 @@
+{
+  "pulseforge": {
+    "vendor": "PulseForge",
+    "plant_id": "PLANT_01",
+    "batch_generated_at": "2026-04-18T08:30:00Z",
+    "events": [
+      {
+        "event_id": "PF-1201",
+        "machine_id": "",
+        "line_id": "LINE-A",
+        "event_time": "2026-04-18T08:28:12Z",
+        "event_type": "HIGH_VIBRATION",
+        "severity": "high",
+        "vibration_mm_s": 10.9,
+        "temperature_c": 82.5,
+        "machine_state": "running",
+        "sensor_health": 0.9,
+        "vendor_confidence": 0.88
+      },
+      {
+        "event_id": "PF-1202",
+        "machine_id": "EQ-002",
+        "line_id": "LINE-A",
+        "event_time": "18-04-2026 08:28:20",
+        "event_type": "TEMP_SPIKE",
+        "severity": "urgent",
+        "vibration_mm_s": 6.0,
+        "temperature_c": -999,
+        "machine_state": "running",
+        "sensor_health": "bad",
+        "vendor_confidence": 1.2
+      }
+    ]
+  },
+  "thermexwatch": {
+    "source": "ThermexWatch",
+    "site_code": "PLANT_02",
+    "response_time_epoch_ms": 1776500600000,
+    "readings": [
+      {
+        "readingId": "TW-9911",
+        "assetCode": null,
+        "productionLine": "D",
+        "timestampMs": "bad-ts",
+        "alertCode": "TEMP_WARN",
+        "level": "four",
+        "vibration_g": 0.4,
+        "temperature_f": 170.0,
+        "power_kw": 24.0,
+        "is_active": true,
+        "signal_quality": "GOOD"
+      },
+      {
+        "readingId": "TW-9912",
+        "assetCode": "EQ-008",
+        "productionLine": "ZZ",
+        "timestampMs": 1776500220000,
+        "alertCode": "UNKNOWN_ALERT",
+        "level": 4,
+        "vibration_g": 0.29,
+        "temperature_f": 188.0,
+        "power_kw": 33.0,
+        "is_active": true,
+        "signal_quality": "GOOD"
+      }
+    ]
+  }
+}

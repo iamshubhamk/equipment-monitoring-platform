@@ -1,0 +1,65 @@
+{
+  "pulseforge": {
+    "vendor": "PulseForge",
+    "plant_id": "PLANT_01",
+    "batch_generated_at": "2026-04-18T08:35:00Z",
+    "events": [
+      {
+        "event_id": "PF-1302",
+        "machine_id": "EQ-001",
+        "line_id": "LINE-A",
+        "event_time": "2026-04-18T08:32:05Z",
+        "event_type": "RECOVERY_SIGNAL",
+        "severity": "low",
+        "vibration_mm_s": 3.9,
+        "temperature_c": 68.1,
+        "machine_state": "running",
+        "sensor_health": 0.95,
+        "vendor_confidence": 0.92
+      },
+      {
+        "event_id": "PF-1301",
+        "machine_id": "EQ-001",
+        "line_id": "LINE-A",
+        "event_time": "2026-04-18T08:31:02Z",
+        "event_type": "HIGH_VIBRATION",
+        "severity": "high",
+        "vibration_mm_s": 12.2,
+        "temperature_c": 84.0,
+        "machine_state": "running",
+        "sensor_health": 0.9,
+        "vendor_confidence": 0.89
+      }
+    ]
+  },
+  "maintaflow": {
+    "provider_name": "MaintaFlow",
+    "factory_id": "PLANT_01",
+    "records": [
+      {
+        "record_id": "MF-701",
+        "machine_ref": "EQ-004",
+        "line_ref": "LINE-C",
+        "recorded_at": "2026/04/18 08:40:00",
+        "record_type": "maintenance_update",
+        "inspection_result": null,
+        "maintenance_status": "completed",
+        "days_since_last_service": 0,
+        "technician_note": "Power module replaced",
+        "manual_confidence": "high"
+      },
+      {
+        "record_id": "MF-700",
+        "machine_ref": "EQ-004",
+        "line_ref": "LINE-C",
+        "recorded_at": "2026/04/18 08:05:00",
+        "record_type": "operator_note",
+        "inspection_result": null,
+        "maintenance_status": "unknown",
+        "days_since_last_service": null,
+        "technician_note": "Machine stalled before shift start",
+        "manual_confidence": "medium"
+      }
+    ]
+  }
+}

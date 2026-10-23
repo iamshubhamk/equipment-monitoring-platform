@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Local config
+.env
+
+# Assessment brief is not part of the submission
+Aurik_Technologies_Founding_Tech_Lead_Assessment_Candidate_Brief.pdf
